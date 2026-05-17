@@ -93,14 +93,12 @@ bool detectZebraCrossing(const cv::Mat& inputImage) {
         // 按y坐标排序
         std::sort(stripeRects.begin(), stripeRects.end(), 
             [](const cv::Rect& a, const cv::Rect& b) { return a.y < b.y; });
-        
         // 计算平均间距
         float avgGap = 0;
         for (size_t i = 1; i < stripeRects.size(); ++i) {
             avgGap += (stripeRects[i].y - stripeRects[i-1].y);
         }
         avgGap /= (stripeRects.size() - 1);
-        
         // 检查间距均匀性
         bool isZebra = true;
         for (size_t i = 1; i < stripeRects.size(); ++i) {
@@ -110,10 +108,8 @@ bool detectZebraCrossing(const cv::Mat& inputImage) {
                 break;
             }
         }
-        
         return isZebra;
     }
-    
     return false;
 }
 
@@ -431,35 +427,35 @@ int CameraHandler(void) {
         dest_frame_duration1 = static_cast<double>(1000000 / std::min(fps, dest_fps));
     }
 
-    // 红绿灯检测核心逻辑 (性能优化：每5帧处理一次，且使用 80x60 低分辨率)
-    // if (frame_skip_count++ % 5 == 0) {
-    //     cv::Mat small_frame;
-    //     cv::resize(raw_frame, small_frame, cv::Size(80, 60));
-    //     //TrafficLightState tl_state = detectTrafficLight(small_frame);
+    红绿灯检测核心逻辑 (性能优化：每5帧处理一次，且使用 80x60 低分辨率)
+    if (frame_skip_count++ % 5 == 0) {
+        cv::Mat small_frame;
+        cv::resize(raw_frame, small_frame, cv::Size(80, 60));
+        TrafficLightState tl_state = detectTrafficLight(small_frame);
         
-    //     if (tl_state == TL_RED) {
-    //         if (!tl_stopped) {
-    //             tl_stopped = true;
-    //             printf("[%s] [红绿灯] >>> 红灯！停止中... <<<\n", getCurrentTime().c_str());
-    //             wonderEchoSend(0xFF, 0x0A);
-    //         }
-    //     } else if (tl_state == TL_GREEN) {
-    //         if (tl_stopped) {
-    //             tl_stopped = false;
-    //             printf("[%s] [红绿灯] >>> 绿灯！恢复行驶 <<<\n", getCurrentTime().c_str());
-    //             const double new_speed = readDoubleFromFile(speed_file);
-    //             std::lock_guard<std::mutex> lock(speedMutex);
-    //             target_speed = new_speed;
-    //         }
-    //     } else if (tl_stopped && tl_state == TL_NONE) {
-    //         // 如果红灯消失了（没看到红也没看到绿），我们也认为可以通行
-    //         tl_stopped = false;
-    //         printf("[%s] [红绿灯] 信号灯消失，恢复行驶。\n", getCurrentTime().c_str());
-    //         const double new_speed = readDoubleFromFile(speed_file);
-    //         std::lock_guard<std::mutex> lock(speedMutex);
-    //         target_speed = new_speed;
-    //     }
-    // }
+        if (tl_state == TL_RED) {
+            if (!tl_stopped) {
+                tl_stopped = true;
+                printf("[%s] [红绿灯] >>> 红灯！停止中... <<<\n", getCurrentTime().c_str());
+                wonderEchoSend(0xFF, 0x0A);
+            }
+        } else if (tl_state == TL_GREEN) {
+            if (tl_stopped) {
+                tl_stopped = false;
+                printf("[%s] [红绿灯] >>> 绿灯！恢复行驶 <<<\n", getCurrentTime().c_str());
+                const double new_speed = readDoubleFromFile(speed_file);
+                std::lock_guard<std::mutex> lock(speedMutex);
+                target_speed = new_speed;
+            }
+        } else if (tl_stopped && tl_state == TL_NONE) {
+            // 如果红灯消失了（没看到红也没看到绿），我们也认为可以通行
+            tl_stopped = false;
+            printf("[%s] [红绿灯] 信号灯消失，恢复行驶。\n", getCurrentTime().c_str());
+            const double new_speed = readDoubleFromFile(speed_file);
+            std::lock_guard<std::mutex> lock(speedMutex);
+            target_speed = new_speed;
+        }
+    }
     
     cv::Mat gray, binary;
     cvtColor(raw_frame, gray, cv::COLOR_BGR2GRAY);
@@ -533,7 +529,7 @@ int CameraHandler(void) {
     last_zebra_detected = current_zebra;
 }
 
-    if (is_stopped) 
+    if (is_stopped || tl_stopped) 
     {
         if (current_time - stop_start_time >= STOP_TIME_SECONDS) 
         {
@@ -544,93 +540,24 @@ int CameraHandler(void) {
                 std::lock_guard<std::mutex> lock(speedMutex);
                 target_speed = new_speed;
             }
-            printf("[%s] 斑马线停车结束，恢复速度至%.1f\n", getCurrentTime().c_str(), new_speed);
+            // printf("[%s] 斑马线停车结束，恢复速度至%.1f\n", getCurrentTime().c_str(), new_speed);
             start_time = cv::getTickCount() / cv::getTickFrequency();
             banmaxian_num++;
         }
     }
 
     // 综合设置停止标志
-    if (is_stopped || tl_stopped) {
-        sign = 1;
-        std::lock_guard<std::mutex> lock(speedMutex);
-        target_speed = 0.0;
-        for (int i = 0; i < 2; ++i) {
-            motorController[i]->updateduty(0);
-        }
-        return 0; // 停止状态下不执行后续逻辑
-    } else {
-        sign = 0;
-    }
-
-    // // 白线检测核心逻辑
-    // // 1. 定义检测区域（底部水平带状区域）
-    // cv::Rect roi(0, gray.rows - DETECTION_ROI_HEIGHT, gray.cols, DETECTION_ROI_HEIGHT);
-    // cv::Mat detectionZone = gray(roi);
- 
-    // // 2. 二值化处理
-    // cv::threshold(detectionZone, binary, WHITE_LINE_THRESHOLD, 255, cv::THRESH_BINARY);
- 
-    // // 3. 检测白线位置（找最上方的白色像素）
-    // static std::atomic<bool> whiteLineDetected{false};
-    // bool currentDetection = false;
- 
-    // for (int y = binary.rows - 1; y >= 0; --y) 
-    // {
-    //     uchar* row = binary.ptr<uchar>(y);
-    //     for (int x = 0; x < binary.cols; ++x) 
-    //     {
-    //         if (row[x] == 255) {
-    //             if ((binary.rows - y) <= STOP_DISTANCE_PX) 
-    //             {
-    //                 currentDetection = true;
-    //                 break;
-    //             }
-    //         }
-    //     }
-    //     if (currentDetection) break;
-    // }
-
-    // // 4. 状态更新和停车控制
-    // static auto stopStartTime = std::chrono::steady_clock::now();
-    // if (currentDetection && !whiteLineDetected.load()) 
-    // {
-    //     whiteLineDetected = true;
-    //     stopStartTime = std::chrono::steady_clock::now();
-     
+    // if (is_stopped || tl_stopped) {
+    //     sign = 1;
     //     std::lock_guard<std::mutex> lock(speedMutex);
-    //     // target_speed = 0.0;
-    //     stop_sign = 1;  // 设置停车标志
-     
-    //     printf("[%s] 检测到白线，触发停车\n", getCurrentTime().c_str());
-     
-    //     // 可选：触发语音提示
-    //     // int ret = wonderEchoSend(0xFF, 0x11);
-    //     // if (ret != 0) {
-    //     //     printf("语音发送失败，错误码：%d\n", ret);
-    //     // }
-    // }
-
-    // // 5. 停车超时恢复
-    // if (whiteLineDetected.load()) 
-    // {
-    //     auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(
-    //         std::chrono::steady_clock::now() - stopStartTime).count();
-     
-    //     if (elapsed >= STOP_DURATION) 
-    //     {
-    //         whiteLineDetected = false;
-    //         stop_sign = 0;  // 清除停车标志
-         
-    //         const double new_speed = readDoubleFromFile(speed_file);
-    //         {
-    //             std::lock_guard<std::mutex> lock(speedMutex);
-    //             target_speed = new_speed;
-    //         }
-    //         printf("[%s] 停车结束，恢复行驶\n", getCurrentTime().c_str());
+    //     target_speed = 0.0;
+    //     for (int i = 0; i < 2; ++i) {
+    //         motorController[i]->updateduty(0);
     //     }
-    //  }
-
+    //     return 0; // 停止状态下不执行后续逻辑
+    // } else {
+    //     sign = 0;
+    // }
 
 // 控制
     if (readFlag(start_file)) 
@@ -667,30 +594,20 @@ int CameraHandler(void) {
                 double duty_adjustment = SpeedPID.updatemortor(speed_error);
                // double lth_speed=readDoubleFromFile()
                 motorController[i]->updateduty(duty_adjustment);
-            //    motorController[i]->updateduty(0);
-              //  std::cout << "current_speed : " << current_speed << std::endl;
-               // std::cout << "edcoder_speed : " << edcoder_speed << std::endl;
-                // std::cout << "last_duty : " << last_duty << std::endl;
-                //std::cout << "duty_adjustment : " << duty_adjustment << std::endl;
+        
             }
         }
-        // else
-        // {
-        //     target_speed = 0.0;
-        //     // 使用PID控制每个电机（示例）
-        //     for (int i = 0; i < 2; ++i) 
-        //     {
-        //         motorController[i]->updateduty(0);
-        // //         double edcoder_speed = -motorController[i]->encoderSpeed();
-        // //         double speed_error = target_speed - edcoder_speed;
-
-        // //         BrakePID.setPID(stop_kp, stop_ki, stop_kd);
-        // //         // PID控制
-        // //         double duty_stop = BrakePID.updatemortor(speed_error);
-            
-        // //         motorController[i]->updateduty(duty_stop);
-        //     }
-    // }
+         else
+        {
+   
+            std::lock_guard<std::mutex> lock(speedMutex);
+            target_speed = 0.0;
+            // 使用PID控制每个电机（示例）
+            for (int i = 0; i < 2; ++i) 
+            {
+                motorController[i]->updateduty(0);
+            }
+       }
 
         // mortorEN.setValue(1);
 
